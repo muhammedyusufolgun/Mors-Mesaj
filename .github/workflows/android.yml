@@ -1,0 +1,26 @@
+name: Android APK
+on: [push, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Mors dönüşümü ve zamanlama testi
+        run: |
+          javac -encoding UTF-8 -d /tmp/morstest app/src/main/java/tr/olgun/mors/Morse.java tests/MorseTest.java
+          java -cp /tmp/morstest tr.olgun.mors.MorseTest
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: gradle :app:assembleDebug --console=plain
+      - run: cp app/build/outputs/apk/debug/app-debug.apk Mors-Mesaj.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mors-Mesaj
+          path: Mors-Mesaj.apk
