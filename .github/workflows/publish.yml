@@ -1,0 +1,26 @@
+name: İmzalı APK yayını
+on:
+  push:
+    branches: [main]
+    paths: ['release/Mors-Mesaj.apk']
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Yayın imzasını önceki sürümle karşılaştır
+        run: |
+          set -euo pipefail
+          sdk=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          gh release download apk-44467562901-1 -p Mors-Mesaj.apk -D "$RUNNER_TEMP/previous"
+          certificate() { "$sdk/apksigner" verify --print-certs "$1" | grep 'Signer #1 certificate SHA-256 digest:'; }
+          previous=$(certificate "$RUNNER_TEMP/previous/Mors-Mesaj.apk")
+          current=$(certificate release/Mors-Mesaj.apk)
+          test "$previous" = "$current"
+          version=$("$sdk/aapt" dump badging release/Mors-Mesaj.apk | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p")
+          test -n "$version"
+          gh release create "v$version" release/Mors-Mesaj.apk --target "$GITHUB_SHA" --title "Mors Mesaj $version" --generate-notes

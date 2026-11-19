@@ -2,9 +2,6 @@ package tr.olgun.mors;
 
 import android.Manifest;
 import android.app.AlertDialog;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.DialogInterface;
 import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.graphics.*;
@@ -24,7 +21,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     LinearLayout page;
     EditText input;
     TextView preview,status,received;
-    Button send,listen,paste,saveReceived;
+    Button send,listen,saveDraft,saveReceived;
     MessageStore store;
     AudioMorse audio;
     boolean soundMode;
@@ -39,7 +36,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     List<Integer> sequence;
     int index,width,height;
     long started;
-    double floor;
+    LightDetector lightDetector;
     Morse.Decoder decoder;
     int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
     TextView label(LinearLayout box,String value,int size,int color) {
@@ -83,9 +80,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         input.setHint("Mesaj yazın veya yapıştırın"); tx.addView(input);
         preview=label(tx,"",17,blue); preview.setTypeface(Typeface.MONOSPACE);
         preview.setPadding(0,dp(6),0,dp(6));
-        LinearLayout edits=new LinearLayout(this); tx.addView(edits);
-        paste=smallButton(edits,"Yapıştır"); paste.setOnClickListener(v->pasteText());
-        smallButton(edits,"Kaydet").setOnClickListener(v->saveText(input.getText().toString()));
+        saveDraft=button(tx,"Mesajı kaydet"); saveDraft.setOnClickListener(v->saveText(input.getText().toString()));
         send=button(tx,"Gönder"); send.setOnClickListener(v->{ if(sending) stop("Gönderim durduruldu."); else request("tx"); });
         LinearLayout rx=card();
         label(rx,"Alınan mesaj",16,ink).setTypeface(Typeface.DEFAULT,1);
@@ -117,18 +112,6 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         if(state!=null){input.setText(state.getString("draft","")); lastReceived=state.getString("last","");if(!lastReceived.isEmpty())received.setText(lastReceived);}
         refresh();
     }
-    Button smallButton(LinearLayout row,String text){
-        Button b=button(row,text); b.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));return b;
-    }
-    void pasteText(){
-        ClipboardManager clipboard=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-        ClipData clip=clipboard.getPrimaryClip();
-        CharSequence text=clip==null||clip.getItemCount()==0?null:clip.getItemAt(0).getText();
-        if(TextUtils.isEmpty(text)){status.setText("Panoda yapıştırılacak metin yok.");return;}
-        int a=input.getSelectionStart(), b=input.getSelectionEnd();
-        if(a<0||b<0)a=b=input.length();
-        input.getText().replace(Math.min(a,b),Math.max(a,b),text.toString());input.requestFocus();
-    }
     void saveText(String text){
         if(text.trim().isEmpty()){status.setText("Kaydedilecek mesaj yok.");return;}
         store.save(text);status.setText("Mesaj kaydedildi.");
@@ -137,10 +120,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         ArrayList<MessageStore.Entry> rows=store.entries();
         if(rows.isEmpty()){new AlertDialog.Builder(this).setTitle("Kayıtlı mesajlar").setMessage("Henüz kayıt yok.").setPositiveButton("Kapat",null).show();return;}
         String[] names=new String[rows.size()];
-        for(int i=0;i<rows.size();i++)names[i]=rows.get(i).text;
+        for(int i=0;i<rows.size();i++)names[i]=(i+1)+". "+rows.get(i).text;
         new AlertDialog.Builder(this).setTitle("Kayıtlı mesajlar").setItems(names,(d,n)->{
             MessageStore.Entry entry=rows.get(n);
-            AlertDialog.Builder detail=new AlertDialog.Builder(this).setTitle("Kayıtlı mesaj").setMessage(entry.text)
+            AlertDialog.Builder detail=new AlertDialog.Builder(this).setTitle("Kayıtlı mesaj "+(n+1)).setMessage(entry.text)
                 .setNegativeButton("Kapat",null).setNeutralButton("Sil",(dlg,w)->confirmDelete(entry));
             if(!sending)detail.setPositiveButton("Mesajı kullan",(dlg,w)->{input.setText(entry.text);input.setSelection(input.length());});
             detail.show();
@@ -162,7 +145,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         catch(IllegalArgumentException e){code="";preview.setText(e.getMessage());}
         send.setEnabled(!listening && (sending || !code.isEmpty())); listen.setEnabled(!sending);
         send.setText(sending?"Gönderimi durdur":"Gönder"); listen.setText(listening?"Alımı durdur":(soundMode?"Mikrofondan al":"Kameradan al"));
-        paste.setEnabled(!sending);saveReceived.setEnabled(!lastReceived.isEmpty());
+        saveDraft.setEnabled(!input.getText().toString().trim().isEmpty());saveReceived.setEnabled(!lastReceived.isEmpty());
         for(int i=0;i<channel.getChildCount();i++)channel.getChildAt(i).setEnabled(!sending&&!listening);
         input.setEnabled(!sending);
     }
@@ -245,27 +228,17 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             }
             width=best.width;height=best.height;p.setPreviewSize(width,height);p.setPreviewFormat(android.graphics.ImageFormat.NV21);
             camera.setParameters(p);camera.setDisplayOrientation(info.orientation);
-            camera.setPreviewTexture(texture.getSurfaceTexture());started=SystemClock.elapsedRealtime();floor=-1;
+            camera.setPreviewTexture(texture.getSurfaceTexture());started=SystemClock.elapsedRealtime();lightDetector=new LightDetector();
             camera.setErrorCallback((err,cam)->{if(cam==camera)stop("Kamera bağlantısı kesildi.");});
             camera.setPreviewCallback((data,cam)->{if(listening && cam==camera && data!=null)frame(data);});
             camera.startPreview();
         }catch(Exception e){stop("Kamera açılamadı. Diğer kamera uygulamalarını kapatıp tekrar deneyin.");}
     }
     void frame(byte[] data){
-        // Take the brightest local patch inside the aiming box, averaging out individual noisy pixels.
-        int peak=0;
-        for(int y=height*42/100;y<height*58/100-3;y+=3){
-            for(int x=width*42/100;x<width*58/100-3;x+=3){
-                int i=y*width+x;
-                int value=((data[i]&255)+(data[i+2]&255)+(data[i+2*width]&255)+(data[i+2*width+2]&255))/4;
-                peak=Math.max(value,peak);
-            }
-        }
         long now=SystemClock.elapsedRealtime();
-        if(floor<0)floor=peak;
-        if(now-started<1500){floor+=.18*(peak-floor);return;}
-        boolean light=peak>floor+(decoder.lit?10:20);
-        if(!light)floor+=.025*(peak-floor);
+        boolean calibrating=now-started<1500;
+        boolean light=lightDetector.isLit(data,width,height,calibrating,decoder.lit);
+        if(calibrating)return;
         int length=decoder.message.length();
         decoder.sample(light,now);
         if(length!=decoder.message.length())displayReceived(decoder.message.toString());

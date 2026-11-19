@@ -18,7 +18,7 @@ final class MessageStore extends SQLiteOpenHelper {
     void remove(long id){getWritableDatabase().delete("messages","id=?",new String[]{Long.toString(id)});}
     ArrayList<Entry> entries(){
         ArrayList<Entry> list=new ArrayList<>();
-        try(Cursor c=getReadableDatabase().rawQuery("SELECT id,body FROM messages ORDER BY id DESC",null)){
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT id,body FROM messages ORDER BY id ASC",null)){
             while(c.moveToNext())list.add(new Entry(c.getLong(0),c.getString(1)));
         }
         return list;
