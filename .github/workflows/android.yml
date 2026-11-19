@@ -1,5 +1,11 @@
 name: Android APK
-on: [push, workflow_dispatch]
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: mors-release
+  cancel-in-progress: false
 permissions:
   contents: write
   statuses: write
@@ -18,19 +24,42 @@ jobs:
           java-version: '17'
       - name: Mors dönüşümü ve zamanlama testi
         run: |
-          javac -encoding UTF-8 -d /tmp/morstest app/src/main/java/tr/olgun/mors/Morse.java tests/MorseTest.java
+          javac -encoding UTF-8 -d /tmp/morstest app/src/main/java/tr/olgun/mors/Morse.java app/src/main/java/tr/olgun/mors/ToneDetector.java tests/*.java
           java -cp /tmp/morstest tr.olgun.mors.MorseTest
+          java -cp /tmp/morstest tr.olgun.mors.ToneTest
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - run: gradle :app:assembleDebug --console=plain
-      - run: cp app/build/outputs/apk/debug/app-debug.apk Mors-Mesaj.apk
+      - run: gradle :app:assembleRelease --console=plain
+      - name: Yayın anahtarıyla imzala ve doğrula
+        env:
+          RECOVERY_PEM: ${{ secrets.MORS_RECOVERY_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key="$RUNNER_TEMP/mors.p12"
+          backup="mors-release.p12.cms"
+          # The recovery certificate is public. Only the owner has its private key.
+          if gh release view signing-v1 --json tagName >/dev/null 2>&1; then
+            test -n "$RECOVERY_PEM" || { echo "MORS_RECOVERY_PEM is required to reuse the existing signing identity"; exit 1; }
+            gh release download signing-v1 -p "$backup"
+            printf '%s\n' "$RECOVERY_PEM" > "$RUNNER_TEMP/recovery.pem"
+            openssl cms -decrypt -binary -inform DER -in "$backup" -recip signing/recovery.crt -inkey "$RUNNER_TEMP/recovery.pem" -out "$key"
+          else
+            keytool -genkeypair -storetype PKCS12 -keystore "$key" -storepass encrypted-envelope -keypass encrypted-envelope -alias mors -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=Mors Mesaj"
+            openssl cms -encrypt -binary -aes256 -in "$key" -outform DER -out "$backup" signing/recovery.crt
+            gh release create signing-v1 "$backup" --target "$GITHUB_SHA" --title "Şifreli imza yedeği" --notes "Yayın anahtarının şifreli kurtarma kopyası." --prerelease --latest=false
+          fi
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$tools/zipalign" -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" sign --ks "$key" --ks-key-alias mors --ks-pass pass:encrypted-envelope --out Mors-Mesaj.apk "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" verify --verbose --print-certs Mors-Mesaj.apk
       - uses: actions/upload-artifact@v4
         with:
           name: Mors-Mesaj
           path: Mors-Mesaj.apk
       - name: APK indirme bağlantısını oluştur
-        run: gh release create "apk-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" Mors-Mesaj.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Mors Mesaj 1.0" --notes "Android 6 ve üzeri için Mors Mesaj APK."
+        run: gh release create "apk-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" Mors-Mesaj.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Mors Mesaj 1.1" --notes "Işık ve ses ile Mors, yerel mesaj kayıtları, iki aşamalı silme ve metin yapıştırma."
       - name: Sonucu kaydet
         if: always()
         env:
