@@ -2,9 +2,11 @@ name: İmzalı APK yayını
 on:
   push:
     branches: [main]
-    paths: ['release/Mors-Mesaj.apk']
+    paths: ['release/Mors-Mesaj.apk', '.github/workflows/publish.yml']
+  workflow_dispatch:
 permissions:
   contents: write
+  statuses: write
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -23,4 +25,20 @@ jobs:
           test "$previous" = "$current"
           version=$("$sdk/aapt" dump badging release/Mors-Mesaj.apk | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p")
           test -n "$version"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            gh release download "v$version" -p Mors-Mesaj.apk -D "$RUNNER_TEMP/published"
+            cmp release/Mors-Mesaj.apk "$RUNNER_TEMP/published/Mors-Mesaj.apk"
+            exit 0
+          fi
           gh release create "v$version" release/Mors-Mesaj.apk --target "$GITHUB_SHA" --title "Mors Mesaj $version" --generate-notes
+      - name: İmzalı APK dosyasını artifact olarak yükle
+        id: apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mors-Mesaj
+          path: release/Mors-Mesaj.apk
+          if-no-files-found: error
+      - name: APK indirme bağlantısını kaydet
+        env:
+          ARTIFACT_URL: ${{ steps.apk.outputs.artifact-url }}
+        run: gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=success -f context=android/artifact -f target_url="$ARTIFACT_URL"
