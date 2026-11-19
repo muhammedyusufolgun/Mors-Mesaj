@@ -18,7 +18,8 @@ import java.util.*;
 public class MainActivity extends Activity implements TextureView.SurfaceTextureListener {
     final Handler handler = new Handler(Looper.getMainLooper());
     final int blue=0xff036da5, ink=0xff142d40;
-    LinearLayout page;
+    LinearLayout page, savedRows;
+    final int paleGreen=0xffc8ebcc, paleBlue=0xffc6e7ff, paleRed=0xffffcaca;
     EditText input;
     TextView preview,status,received;
     Button send,listen,saveDraft,saveReceived;
@@ -65,7 +66,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         page=new LinearLayout(this); page.setOrientation(1); page.setBackgroundColor(0xfff4f7fa);
         page.setPadding(dp(16),dp(16),dp(16),dp(18)); page.setFocusableInTouchMode(true);
         scroll.addView(page); setContentView(scroll);
-        label(page,"Mors Mesaj",28,ink).setTypeface(Typeface.DEFAULT,1);
+        TextView title=label(page,"Mors Mesaj",28,ink);
+        title.setGravity(Gravity.CENTER);title.setTypeface(Typeface.DEFAULT,1);
         store=new MessageStore(this);
         channel=new RadioGroup(this); channel.setOrientation(LinearLayout.HORIZONTAL);
         page.addView(channel);
@@ -80,7 +82,6 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         input.setHint("Mesaj yazın veya yapıştırın"); tx.addView(input);
         preview=label(tx,"",17,blue); preview.setTypeface(Typeface.MONOSPACE);
         preview.setPadding(0,dp(6),0,dp(6));
-        saveDraft=button(tx,"Mesajı kaydet"); saveDraft.setOnClickListener(v->saveText(input.getText().toString()));
         send=button(tx,"Gönder"); send.setOnClickListener(v->{ if(sending) stop("Gönderim durduruldu."); else request("tx"); });
         LinearLayout rx=card();
         label(rx,"Alınan mesaj",16,ink).setTypeface(Typeface.DEFAULT,1);
@@ -97,10 +98,18 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         };
         finder.addView(target); rx.addView(finder,new LinearLayout.LayoutParams(-1,dp(180))); finder.setVisibility(View.GONE);
         listen=button(rx,"Kameradan al"); listen.setOnClickListener(v->{if(listening) stop("Alım durduruldu."); else request("rx");});
-        saveReceived=button(rx,"Alınan mesajı kaydet");saveReceived.setOnClickListener(v->saveText(lastReceived));
-        button(page,"Kayıtlı mesajlar").setOnClickListener(v->showSaved());
         status=label(page,"",15,ink); status.setPadding(dp(2),dp(12),0,0);
         status.setText("Alıcıyı gönderimden önce açın.");
+        LinearLayout records=card();
+        saveDraft=button(records,"Gönderilen Mesajı Kaydet");
+        tint(saveDraft,paleGreen);
+        saveDraft.setOnClickListener(v->saveText(input.getText().toString()));
+        saveReceived=button(records,"Alınan Mesajı Kaydet");
+        tint(saveReceived,paleBlue);
+        saveReceived.setOnClickListener(v->saveText(lastReceived));
+        label(records,"Kayıtlı mesajlar",16,ink).setTypeface(Typeface.DEFAULT,1);
+        savedRows=new LinearLayout(this);savedRows.setOrientation(LinearLayout.VERTICAL);
+        records.addView(savedRows);showSaved();
         TextView footer=label(page,"Muhammed Yusuf OLGUN",14,0xff526475);
         footer.setGravity(Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL); footer.setPadding(0,dp(16),0,0);
         footer.setLayoutParams(new LinearLayout.LayoutParams(-1,-2,1));
@@ -114,20 +123,35 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
     void saveText(String text){
         if(text.trim().isEmpty()){status.setText("Kaydedilecek mesaj yok.");return;}
-        store.save(text);status.setText("Mesaj kaydedildi.");
+        store.save(text);showSaved();status.setText("Mesaj kaydedildi.");
     }
     void showSaved(){
+        savedRows.removeAllViews();
         ArrayList<MessageStore.Entry> rows=store.entries();
-        if(rows.isEmpty()){new AlertDialog.Builder(this).setTitle("Kayıtlı mesajlar").setMessage("Henüz kayıt yok.").setPositiveButton("Kapat",null).show();return;}
-        String[] names=new String[rows.size()];
-        for(int i=0;i<rows.size();i++)names[i]=(i+1)+". "+rows.get(i).text;
-        new AlertDialog.Builder(this).setTitle("Kayıtlı mesajlar").setItems(names,(d,n)->{
-            MessageStore.Entry entry=rows.get(n);
-            AlertDialog.Builder detail=new AlertDialog.Builder(this).setTitle("Kayıtlı mesaj "+(n+1)).setMessage(entry.text)
-                .setNegativeButton("Kapat",null).setNeutralButton("Sil",(dlg,w)->confirmDelete(entry));
-            if(!sending)detail.setPositiveButton("Mesajı kullan",(dlg,w)->{input.setText(entry.text);input.setSelection(input.length());});
-            detail.show();
-        }).setNegativeButton("Kapat",null).show();
+        if(rows.isEmpty())label(savedRows,"Henüz kayıt yok.",14,ink);
+        for(int i=0;i<rows.size();i++){
+            MessageStore.Entry entry=rows.get(i);
+            int number=i+1;
+            TextView row=label(savedRows,number+". "+entry.text,16,ink);
+            row.setMinHeight(dp(48));row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setOnLongClickListener(v->{showActions(entry,number);return true;});
+        }
+    }
+    void tint(Button button,int color){
+        button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(color));
+        button.setTextColor(ink);
+    }
+    void showActions(MessageStore.Entry entry,int number){
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Kayıtlı mesaj "+number)
+            .setMessage(entry.text).setNegativeButton("Sil",(d,w)->confirmDelete(entry))
+            .setPositiveButton("Mesajı kullan",(d,w)->{
+                input.setText(entry.text);input.setSelection(input.length());input.requestFocus();
+                input.post(()->input.requestRectangleOnScreen(new Rect(0,0,input.getWidth(),input.getHeight())));
+            }).show();
+        Button use=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        use.setBackgroundResource(android.R.drawable.btn_default);use.setAllCaps(false);use.setEnabled(!sending);tint(use,paleGreen);
+        Button delete=dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        delete.setBackgroundResource(android.R.drawable.btn_default);delete.setAllCaps(false);tint(delete,paleRed);
     }
     void confirmDelete(MessageStore.Entry entry){
         new AlertDialog.Builder(this).setTitle("Mesaj silinsin mi? (1/2)").setMessage(entry.text)
