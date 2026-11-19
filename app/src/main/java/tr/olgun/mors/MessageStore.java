@@ -15,6 +15,10 @@ final class MessageStore extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase db){db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT NOT NULL)");}
     public void onUpgrade(SQLiteDatabase db,int from,int to){}
     void save(String text){ContentValues values=new ContentValues();values.put("body",text);getWritableDatabase().insertOrThrow("messages",null,values);}
+    void update(long id,String text){
+        ContentValues values=new ContentValues();values.put("body",text);
+        getWritableDatabase().update("messages",values,"id=?",new String[]{Long.toString(id)});
+    }
     void remove(long id){getWritableDatabase().delete("messages","id=?",new String[]{Long.toString(id)});}
     ArrayList<Entry> entries(){
         ArrayList<Entry> list=new ArrayList<>();

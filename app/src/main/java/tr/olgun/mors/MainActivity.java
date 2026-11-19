@@ -55,7 +55,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
     Button button(LinearLayout box,String caption) {
         Button b=new Button(this); b.setText(caption); b.setAllCaps(false);
-        b.setTextColor(-1); b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(blue));
+        tint(b,blue); b.setTextColor(-1);
         box.addView(b,new LinearLayout.LayoutParams(-1,-2)); return b;
     }
     @Override public void onCreate(Bundle state) {
@@ -67,6 +67,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         page.setPadding(dp(16),dp(16),dp(16),dp(18)); page.setFocusableInTouchMode(true);
         scroll.addView(page); setContentView(scroll);
         TextView title=label(page,"Mors Mesaj",28,ink);
+        title.setTextColor(Color.WHITE);title.setBackgroundColor(0xff203879);
+        title.setPadding(dp(8),dp(3),dp(8),dp(3));
+        title.setContentDescription("Mors Mesaj, yazılan mesajı temizle");
+        title.setOnClickListener(v->input.setText(""));
         title.setGravity(Gravity.CENTER);title.setTypeface(Typeface.DEFAULT,1);
         store=new MessageStore(this);
         channel=new RadioGroup(this); channel.setOrientation(LinearLayout.HORIZONTAL);
@@ -132,26 +136,44 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         for(int i=0;i<rows.size();i++){
             MessageStore.Entry entry=rows.get(i);
             int number=i+1;
-            TextView row=label(savedRows,number+". "+entry.text,16,ink);
+            LinearLayout line=new LinearLayout(this);
+            line.setGravity(Gravity.CENTER_VERTICAL); savedRows.addView(line);
+            TextView row=label(line,number+". "+entry.text,16,ink);
+            row.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
             row.setMinHeight(dp(48));row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setOnLongClickListener(v->{showActions(entry,number);return true;});
+            row.setOnClickListener(v->{
+                if(sending){status.setText("Mesajı kullanmak için gönderimin bitmesini bekleyin.");return;}
+                input.setText(entry.text);input.setSelection(input.length());input.requestFocus();
+                input.post(()->input.requestRectangleOnScreen(new Rect(0,0,input.getWidth(),input.getHeight())));
+            });
+            Button edit=button(line,"Düzenle");edit.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));
+            tint(edit,0xffffb65c);
+            edit.setOnClickListener(v->editEntry(entry,number));
         }
     }
     void tint(Button button,int color){
-        button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(color));
+        GradientDrawable shape=new GradientDrawable();
+        shape.setColor(color);shape.setCornerRadius(dp(5));
+        android.graphics.drawable.InsetDrawable inset=new android.graphics.drawable.InsetDrawable(shape,0,dp(7),0,dp(7));
+        button.setBackgroundTintList(null);
+        button.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x24000000),inset,null));
+        button.setMinHeight(dp(48));button.setPadding(dp(12),dp(7),dp(12),dp(7));
         button.setTextColor(ink);
     }
-    void showActions(MessageStore.Entry entry,int number){
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Kayıtlı mesaj "+number)
-            .setMessage(entry.text).setNegativeButton("Sil",(d,w)->confirmDelete(entry))
-            .setPositiveButton("Mesajı kullan",(d,w)->{
-                input.setText(entry.text);input.setSelection(input.length());input.requestFocus();
-                input.post(()->input.requestRectangleOnScreen(new Rect(0,0,input.getWidth(),input.getHeight())));
-            }).show();
-        Button use=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-        use.setBackgroundResource(android.R.drawable.btn_default);use.setAllCaps(false);use.setEnabled(!sending);tint(use,paleGreen);
-        Button delete=dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
-        delete.setBackgroundResource(android.R.drawable.btn_default);delete.setAllCaps(false);tint(delete,paleRed);
+    void editEntry(MessageStore.Entry entry,int number){
+        EditText editor=new EditText(this);editor.setText(entry.text);editor.setSelection(editor.length());
+        editor.setMaxLines(6);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Mesajı düzenle · "+number)
+            .setView(editor).setNegativeButton("Vazgeç",null)
+            .setNeutralButton("Sil",(d,w)->confirmDelete(entry))
+            .setPositiveButton("Kaydet",null).show();
+        tint(dialog.getButton(AlertDialog.BUTTON_NEUTRAL),paleRed);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String text=editor.getText().toString();
+            if(text.trim().isEmpty()){editor.setError("Mesaj yazın");return;}
+            store.update(entry.id,text);showSaved();dialog.dismiss();status.setText("Mesaj güncellendi.");
+        });
     }
     void confirmDelete(MessageStore.Entry entry){
         new AlertDialog.Builder(this).setTitle("Mesaj silinsin mi? (1/2)").setMessage(entry.text)
